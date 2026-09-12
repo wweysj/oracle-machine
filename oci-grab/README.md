@@ -9,7 +9,9 @@
 | 文件 | 作用 |
 |---|---|
 | `oci-grab/grab.py` | 抢购脚本：多可用域轮询、失败自动重试、成功后 Telegram/Server酱 通知 |
-| `.github/workflows/grab.yml` | 定时工作流：每 30 分钟触发一次（GitHub 排队会有几分钟延迟，属正常） |
+| `.github/workflows/grab.yml` | 定时工作流：每 15 分钟触发一次（GitHub 排队会有几分钟延迟，属正常） |
+
+> ⚠️ **私有仓库额度提醒**：GitHub 免费账户私有仓库每月仅 2000 分钟 Actions 额度。建议把仓库设为 Public（Settings → General → Danger Zone → Change visibility），公开仓库 Actions 不限时，且凭据在加密 Secrets 中、日志自动打码，公开无风险。
 
 ## 一、获取 OCI 凭据（约 10 分钟）
 
