@@ -29,9 +29,14 @@ INTERVAL = int(_env("INTERVAL_SECONDS", "300"))   # 轮询间隔, 默认 5 分�
 MAX_ATTEMPTS = int(_env("MAX_ATTEMPTS", "0"))     # 0 = 无限轮询
 ADS = [a.strip() for a in os.environ.get("AVAILABILITY_DOMAINS", "").split(",") if a.strip()]
 
-# ---------- 必填凭据(去除首尾空白/换行, 防止 secret 粘贴时带入) ----------
+# ---------- 必填凭据(去除首尾空白/换行/不可见字符, 防止 secret 粘贴时带入) ----------
 def _cred(name: str) -> str:
-    return os.environ.get(name, "").strip()
+    raw = os.environ.get(name, "")
+    # 仅保留 OCID/指纹/区域中的合法字符, 过滤零宽空格等不可见字符
+    cleaned = "".join(c for c in raw if c.isalnum() or c in "._-:")
+    if cleaned != raw:
+        print(f"[warn] {name} 含非法字符, 已自动清洗 (长度 {len(raw)} -> {len(cleaned)})")
+    return cleaned
 
 config = {
     "tenancy": _cred("OCI_TENANCY"),
@@ -40,6 +45,10 @@ config = {
     "region": _cred("OCI_REGION"),
     "key_content": os.environ.get("OCI_PRIVATE_KEY", "").replace("\\n", "\n").strip() + "\n",
 }
+# 启动诊断: 只打印长度, 不泄露内容
+for k, v in config.items():
+    if k != "key_content":
+        print(f"[diag] {k} 长度={len(v)}")
 COMPARTMENT = os.environ.get("COMPARTMENT_ID", config["tenancy"])
 SUBNET_ID = os.environ["SUBNET_ID"]
 IMAGE_ID = os.environ.get("IMAGE_ID", "")  # 留空则自动选用最新的 Ubuntu ARM 镜像
