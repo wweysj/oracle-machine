@@ -1,0 +1,44 @@
+name: OCI A1 Grab
+
+on:
+  schedule:
+    # GitHub cron 用 UTC 时间, 这里每 30 分钟触发一次(实际会排队延迟几分钟, 属正常)
+    - cron: "*/30 * * * *"
+  workflow_dispatch: {} # 支持手动触发测试
+
+concurrency:
+  group: oci-grab
+  cancel-in-progress: false
+
+jobs:
+  grab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: pip install oci
+
+      - name: Run grab
+        env:
+          OCI_TENANCY: ${{ secrets.OCI_TENANCY }}
+          OCI_USER: ${{ secrets.OCI_USER }}
+          OCI_FINGERPRINT: ${{ secrets.OCI_FINGERPRINT }}
+          OCI_REGION: ${{ secrets.OCI_REGION }}
+          OCI_PRIVATE_KEY: ${{ secrets.OCI_PRIVATE_KEY }}
+          SUBNET_ID: ${{ secrets.SUBNET_ID }}
+          IMAGE_ID: ${{ secrets.IMAGE_ID }}
+          SSH_PUBLIC_KEY: ${{ secrets.SSH_PUBLIC_KEY }}
+          COMPARTMENT_ID: ${{ secrets.COMPARTMENT_ID }}
+          INSTANCE_NAME: ${{ secrets.INSTANCE_NAME }}
+          OCPUS: ${{ secrets.OCPUS }}
+          MEMORY_GB: ${{ secrets.MEMORY_GB }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
+        run: python oci-grab/grab.py
