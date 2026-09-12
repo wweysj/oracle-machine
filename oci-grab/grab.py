@@ -27,6 +27,8 @@ OCPUS = float(_env("OCPUS", "2"))          # 默认 2 核(新免费配额)
 MEMORY_GB = float(_env("MEMORY_GB", "12"))  # 默认 12G; 抢不到可降为 1核6G 提高成功率
 INTERVAL = int(_env("INTERVAL_SECONDS", "300"))   # 轮询间隔, 默认 5 分钟
 MAX_ATTEMPTS = int(_env("MAX_ATTEMPTS", "0"))     # 0 = 无限轮询
+# 单次运行预算: 到时主动退出(退出码0), 等下次定时触发, 避免被工作流超时强杀显示红叉
+RUN_BUDGET_SECONDS = int(_env("RUN_BUDGET_SECONDS", "1200"))
 ADS = [a.strip() for a in os.environ.get("AVAILABILITY_DOMAINS", "").split(",") if a.strip()]
 
 # ---------- 必填凭据(去除首尾空白/换行/不可见字符, 防止 secret 粘贴时带入) ----------
@@ -139,6 +141,7 @@ def main():
     image_id = resolve_image_id(compute)
 
     attempt = 0
+    deadline = time.time() + RUN_BUDGET_SECONDS
     while True:
         attempt += 1
         for ad in ads:
@@ -168,6 +171,9 @@ def main():
         if MAX_ATTEMPTS and attempt >= MAX_ATTEMPTS:
             print("已达最大尝试次数, 退出")
             return 1
+        if time.time() >= deadline:
+            print(f"本次运行预算 {RUN_BUDGET_SECONDS}s 已用完, 正常退出, 等待下次定时触发继续抢")
+            return 0
         # 间隔 ±20% 抖动, 避免请求过于规律
         time.sleep(int(INTERVAL * random.uniform(0.8, 1.2)))
 
