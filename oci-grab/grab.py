@@ -18,11 +18,15 @@ try:
 except ImportError:
     sys.exit("缺少依赖: 请先执行  pip install oci")
 
-# ---------- 可调参数(全部可用环境变量覆盖) ----------
-OCPUS = float(os.environ.get("OCPUS", "2"))          # 默认 2 核(新免费配额)
-MEMORY_GB = float(os.environ.get("MEMORY_GB", "12"))  # 默认 12G; 抢不到可降为 1核6G 提高成功率
-INTERVAL = int(os.environ.get("INTERVAL_SECONDS", "300"))   # 轮询间隔, 默认 5 分钟
-MAX_ATTEMPTS = int(os.environ.get("MAX_ATTEMPTS", "0"))     # 0 = 无限轮询
+# ---------- 可调参数(全部可用环境变量覆盖; 空值视同未设置) ----------
+def _env(name: str, default: str) -> str:
+    v = os.environ.get(name, "").strip()
+    return v or default
+
+OCPUS = float(_env("OCPUS", "2"))          # 默认 2 核(新免费配额)
+MEMORY_GB = float(_env("MEMORY_GB", "12"))  # 默认 12G; 抢不到可降为 1核6G 提高成功率
+INTERVAL = int(_env("INTERVAL_SECONDS", "300"))   # 轮询间隔, 默认 5 分钟
+MAX_ATTEMPTS = int(_env("MAX_ATTEMPTS", "0"))     # 0 = 无限轮询
 ADS = [a.strip() for a in os.environ.get("AVAILABILITY_DOMAINS", "").split(",") if a.strip()]
 
 # ---------- 必填凭据 ----------
