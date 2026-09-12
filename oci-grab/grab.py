@@ -29,13 +29,16 @@ INTERVAL = int(_env("INTERVAL_SECONDS", "300"))   # 轮询间隔, 默认 5 分�
 MAX_ATTEMPTS = int(_env("MAX_ATTEMPTS", "0"))     # 0 = 无限轮询
 ADS = [a.strip() for a in os.environ.get("AVAILABILITY_DOMAINS", "").split(",") if a.strip()]
 
-# ---------- 必填凭据 ----------
+# ---------- 必填凭据(去除首尾空白/换行, 防止 secret 粘贴时带入) ----------
+def _cred(name: str) -> str:
+    return os.environ.get(name, "").strip()
+
 config = {
-    "tenancy": os.environ["OCI_TENANCY"],
-    "user": os.environ["OCI_USER"],
-    "fingerprint": os.environ["OCI_FINGERPRINT"],
-    "region": os.environ["OCI_REGION"],
-    "key_content": os.environ["OCI_PRIVATE_KEY"].replace("\\n", "\n"),
+    "tenancy": _cred("OCI_TENANCY"),
+    "user": _cred("OCI_USER"),
+    "fingerprint": _cred("OCI_FINGERPRINT"),
+    "region": _cred("OCI_REGION"),
+    "key_content": os.environ.get("OCI_PRIVATE_KEY", "").replace("\\n", "\n").strip() + "\n",
 }
 COMPARTMENT = os.environ.get("COMPARTMENT_ID", config["tenancy"])
 SUBNET_ID = os.environ["SUBNET_ID"]
