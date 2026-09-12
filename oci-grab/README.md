@@ -52,6 +52,9 @@
 | `TELEGRAM_BOT_TOKEN` | TG机器人令牌 | 可选 | @BotFather 建 Bot 获取 |
 | `TELEGRAM_CHAT_ID` | TG聊天编号 | 可选 | @userinfobot 查自己的 ID |
 | `SERVERCHAN_KEY` | Server酱密钥 | 可选 | [Server酱](https://sct.ftqq.com) SendKey，微信通知 |
+| `SMTP_USER` | 发件QQ邮箱 | 可选 | 如 `12345@qq.com`，配 `SMTP_AUTH_CODE` 后抢到发邮件 |
+| `SMTP_AUTH_CODE` | QQ邮箱授权码 | 可选 | QQ邮箱设置→账户→POP3/SMTP→生成授权码（不是QQ密码） |
+| `NOTIFY_EMAIL` | 收件邮箱 | 可选 | 默认发给自己（`SMTP_USER`） |
 
 通知至少配一组（Telegram 或 Server酱），也可以都不配只看 Actions 日志。
 

@@ -66,10 +66,31 @@ print(f"[diag] compartment 长度={len(COMPARTMENT)} subnet 长度={len(SUBNET_I
 TG_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TG_CHAT = os.environ.get("TELEGRAM_CHAT_ID", "")
 SERVERCHAN_KEY = os.environ.get("SERVERCHAN_KEY", "")  # Server酱, 可选
+# QQ 邮箱通知(可选): SMTP_USER=QQ邮箱, SMTP_AUTH_CODE=授权码(不是QQ密码), NOTIFY_EMAIL=收件邮箱
+SMTP_USER = os.environ.get("SMTP_USER", "")
+SMTP_AUTH_CODE = os.environ.get("SMTP_AUTH_CODE", "")
+NOTIFY_EMAIL = os.environ.get("NOTIFY_EMAIL", "")
+
+
+def send_email(title: str, body: str) -> None:
+    """通过 QQ 邮箱 SMTP 发信, 失败不影响主流程。"""
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.header import Header
+
+    msg = MIMEText(body, "plain", "utf-8")
+    msg["Subject"] = Header(title, "utf-8")
+    msg["From"] = SMTP_USER
+    msg["To"] = NOTIFY_EMAIL or SMTP_USER
+    # QQ 邮箱 SMTP: 必须 ssl, 端口 465
+    with smtplib.SMTP_SSL("smtp.qq.com", 465, timeout=20) as s:
+        s.login(SMTP_USER, SMTP_AUTH_CODE)
+        s.sendmail(SMTP_USER, [msg["To"]], msg.as_string())
+    print("[notify] 邮件已发送")
 
 
 def notify(title: str, body: str) -> None:
-    """抢到后通知: Telegram + Server酱(可选), 失败不影响主流程。"""
+    """抢到后通知: Telegram + Server酱 + 邮件(均可选), 失败不影响主流程。"""
     if TG_TOKEN and TG_CHAT:
         try:
             data = urllib.parse.urlencode(
@@ -92,6 +113,11 @@ def notify(title: str, body: str) -> None:
             print("[notify] Server酱 已发送")
         except Exception as e:
             print(f"[notify] Server酱 发送失败: {e}")
+    if SMTP_USER and SMTP_AUTH_CODE:
+        try:
+            send_email(title, body)
+        except Exception as e:
+            print(f"[notify] 邮件发送失败: {e}")
 
 
 def list_availability_domains():
