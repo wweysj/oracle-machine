@@ -49,11 +49,17 @@ config = {
 for k, v in config.items():
     if k != "key_content":
         print(f"[diag] {k} 长度={len(v)}")
-COMPARTMENT = os.environ.get("COMPARTMENT_ID", config["tenancy"])
+_comp_raw = os.environ.get("COMPARTMENT_ID", "").strip()
+if "ocid1.domain." in _comp_raw:
+    # 身份域 OCID 不是区间, 常见误填; 回退到租户 OCID
+    print("[warn] COMPARTMENT_ID 填的是身份域(domain) OCID, 已忽略并改用租户 OCID")
+    _comp_raw = ""
+COMPARTMENT = _comp_raw or config["tenancy"]
 SUBNET_ID = os.environ["SUBNET_ID"]
 IMAGE_ID = os.environ.get("IMAGE_ID", "")  # 留空则自动选用最新的 Ubuntu ARM 镜像
 SSH_PUBLIC_KEY = os.environ.get("SSH_PUBLIC_KEY", "")
 DISPLAY_NAME = os.environ.get("INSTANCE_NAME", "a1-free")
+print(f"[diag] compartment 长度={len(COMPARTMENT)} subnet 长度={len(SUBNET_ID or '')}")
 
 TG_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TG_CHAT = os.environ.get("TELEGRAM_CHAT_ID", "")
