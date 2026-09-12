@@ -18,6 +18,10 @@ try:
 except ImportError:
     sys.exit("缺少依赖: 请先执行  pip install oci")
 
+# 关闭 OCI SDK 内部的隐形重试(一次失败后 SDK 可能自己闷头重试几分钟),
+# 让脚本自己控制的轮询间隔真实生效 (借鉴 oci-arm-catcher 的做法)
+NO_RETRY = oci.retry.NoneRetryStrategy()
+
 # ---------- 可调参数(全部可用环境变量覆盖; 空值视同未设置) ----------
 def _env(name: str, default: str) -> str:
     v = os.environ.get(name, "").strip()
@@ -123,9 +127,8 @@ def notify(title: str, body: str) -> None:
 def list_availability_domains():
     if ADS:
         return ADS
-    identity = oci.identity.IdentityClient(config)
+    identity = oci.identity.IdentityClient(config, retry_strategy=NO_RETRY)
     return [ad.name for ad in identity.list_availability_domains(COMPARTMENT).data]
-
 
 def resolve_image_id(compute) -> str:
     """IMAGE_ID 留空时, 自动查询该区域最新的 Ubuntu ARM (aarch64) 镜像。"""
@@ -163,7 +166,7 @@ def main():
     ads = list_availability_domains()
     print(f"区域 {config['region']} 可用域: {ads}")
     print(f"目标配置: {OCPUS} OCPU / {MEMORY_GB}GB, 间隔 {INTERVAL}s")
-    compute = oci.core.ComputeClient(config)
+    compute = oci.core.ComputeClient(config, retry_strategy=NO_RETRY)
     image_id = resolve_image_id(compute)
 
     attempt = 0
