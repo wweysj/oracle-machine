@@ -29,7 +29,7 @@ def _env(name: str, default: str) -> str:
 
 OCPUS = float(_env("OCPUS", "2"))          # 默认 2 核(新免费配额)
 MEMORY_GB = float(_env("MEMORY_GB", "12"))  # 默认 12G; 抢不到可降为 1核6G 提高成功率
-INTERVAL = int(_env("INTERVAL_SECONDS", "300"))   # 轮询间隔, 默认 5 分钟
+INTERVAL = int(_env("INTERVAL_SECONDS", "180"))   # 轮询间隔, 默认 3 分钟
 MAX_ATTEMPTS = int(_env("MAX_ATTEMPTS", "0"))     # 0 = 无限轮询
 # 单次运行预算: 到时主动退出(退出码0), 等下次定时触发, 避免被工作流超时强杀显示红叉
 RUN_BUDGET_SECONDS = int(_env("RUN_BUDGET_SECONDS", "1200"))
