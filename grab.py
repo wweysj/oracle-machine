@@ -1,0 +1,238 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+OCI 免费 A1 实例容量轮询抢购脚本
+用法: 配好环境变量后运行 python grab.py
+成功创建实例后发送通知并退出(退出码 0)。
+"""
+
+import os
+import random
+import sys
+import time
+import urllib.parse
+import urllib.request
+
+try:
+    import oci
+except ImportError:
+    sys.exit("缺少依赖: 请先执行  pip install oci")
+
+# 关闭 OCI SDK 内部的隐形重试(一次失败后 SDK 可能自己闷头重试几分钟),
+# 让脚本自己控制的轮询间隔真实生效 (借鉴 oci-arm-catcher 的做法)
+NO_RETRY = oci.retry.NoneRetryStrategy()
+
+# ---------- 可调参数(全部可用环境变量覆盖; 空值视同未设置) ----------
+def _env(name: str, default: str) -> str:
+    v = os.environ.get(name, "").strip()
+    return v or default
+
+OCPUS = float(_env("OCPUS", "2"))          # 默认 2 核(新免费配额)
+MEMORY_GB = float(_env("MEMORY_GB", "12"))  # 默认 12G; 抢不到可降为 1核6G 提高成功率
+INTERVAL = int(_env("INTERVAL_SECONDS", "180"))   # 轮询间隔, 默认 3 分钟
+MAX_ATTEMPTS = int(_env("MAX_ATTEMPTS", "0"))     # 0 = 无限轮询
+# 单次运行预算: 到时主动退出(退出码0), 等下次定时触发, 避免被工作流超时强杀显示红叉
+RUN_BUDGET_SECONDS = int(_env("RUN_BUDGET_SECONDS", "1200"))
+ADS = [a.strip() for a in os.environ.get("AVAILABILITY_DOMAINS", "").split(",") if a.strip()]
+
+# ---------- 必填凭据(去除首尾空白/换行/不可见字符, 防止 secret 粘贴时带入) ----------
+def _cred(name: str) -> str:
+    raw = os.environ.get(name, "")
+    # 仅保留 OCID/指纹/区域中的合法字符, 过滤零宽空格等不可见字符
+    cleaned = "".join(c for c in raw if c.isalnum() or c in "._-:")
+    if cleaned != raw:
+        print(f"[warn] {name} 含非法字符, 已自动清洗 (长度 {len(raw)} -> {len(cleaned)})")
+    return cleaned
+
+import base64
+import re
+
+# 尝试从 base64 解码私钥，如果失败则当作普通文本处理
+def _load_private_key() -> str:
+    raw_key = os.environ.get("OCI_PRIVATE_KEY", "").strip()
+
+    # 尝试 base64 解码
+    try:
+        decoded = base64.b64decode(raw_key).decode('utf-8')
+        print("[info] 私钥使用 base64 解码")
+        key = decoded
+    except Exception:
+        # 替换转义的换行符
+        key = raw_key.replace("\\n", "\n")
+
+    # 清理私钥: 只保留从 BEGIN 到 END 的部分
+    match = re.search(r'(-----BEGIN[^-]+-----.*?-----END[^-]+-----)', key, re.DOTALL)
+    if match:
+        key = match.group(1).strip() + "\n"
+        print(f"[diag] 私钥已清理, 长度={len(key)}, 开头={key[:50]}, 结尾={key[-50:]}")
+    else:
+        print("[error] 私钥格式错误: 未找到有效的 PEM 标记")
+        print(f"[diag] 原始内容前100字符: {key[:100]}")
+
+    return key
+
+config = {
+    "tenancy": _cred("OCI_TENANCY"),
+    "user": _cred("OCI_USER"),
+    "fingerprint": _cred("OCI_FINGERPRINT"),
+    "region": _cred("OCI_REGION"),
+    "key_content": _load_private_key(),
+}
+# 启动诊断: 只打印长度, 不泄露内容
+for k, v in config.items():
+    if k != "key_content":
+        print(f"[diag] {k} 长度={len(v)}")
+_comp_raw = os.environ.get("COMPARTMENT_ID", "").strip()
+if "ocid1.domain." in _comp_raw:
+    # 身份域 OCID 不是区间, 常见误填; 回退到租户 OCID
+    print("[warn] COMPARTMENT_ID 填的是身份域(domain) OCID, 已忽略并改用租户 OCID")
+    _comp_raw = ""
+COMPARTMENT = _comp_raw or config["tenancy"]
+SUBNET_ID = os.environ["SUBNET_ID"]
+IMAGE_ID = os.environ.get("IMAGE_ID", "")  # 留空则自动选用最新的 Ubuntu ARM 镜像
+SSH_PUBLIC_KEY = os.environ.get("SSH_PUBLIC_KEY", "")
+DISPLAY_NAME = os.environ.get("INSTANCE_NAME", "a1-free")
+print(f"[diag] compartment 长度={len(COMPARTMENT)} subnet 长度={len(SUBNET_ID or '')}")
+
+TG_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+TG_CHAT = os.environ.get("TELEGRAM_CHAT_ID", "")
+SERVERCHAN_KEY = os.environ.get("SERVERCHAN_KEY", "")  # Server酱, 可选
+# QQ 邮箱通知(可选): SMTP_USER=QQ邮箱, SMTP_AUTH_CODE=授权码(不是QQ密码), NOTIFY_EMAIL=收件邮箱
+SMTP_USER = os.environ.get("SMTP_USER", "")
+SMTP_AUTH_CODE = os.environ.get("SMTP_AUTH_CODE", "")
+NOTIFY_EMAIL = os.environ.get("NOTIFY_EMAIL", "")
+
+
+def send_email(title: str, body: str) -> None:
+    """通过 QQ 邮箱 SMTP 发信, 失败不影响主流程。"""
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.header import Header
+
+    msg = MIMEText(body, "plain", "utf-8")
+    msg["Subject"] = Header(title, "utf-8")
+    msg["From"] = SMTP_USER
+    msg["To"] = NOTIFY_EMAIL or SMTP_USER
+    # QQ 邮箱 SMTP: 必须 ssl, 端口 465
+    with smtplib.SMTP_SSL("smtp.qq.com", 465, timeout=20) as s:
+        s.login(SMTP_USER, SMTP_AUTH_CODE)
+        s.sendmail(SMTP_USER, [msg["To"]], msg.as_string())
+    print("[notify] 邮件已发送")
+
+
+def notify(title: str, body: str) -> None:
+    """抢到后通知: Telegram + Server酱 + 邮件(均可选), 失败不影响主流程。"""
+    if TG_TOKEN and TG_CHAT:
+        try:
+            data = urllib.parse.urlencode(
+                {"chat_id": TG_CHAT, "text": f"{title}\n{body}"}
+            ).encode()
+            urllib.request.urlopen(
+                f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage", data=data, timeout=15
+            )
+            print("[notify] Telegram 已发送")
+        except Exception as e:
+            print(f"[notify] Telegram 发送失败: {e}")
+    if SERVERCHAN_KEY:
+        try:
+            data = urllib.parse.urlencode(
+                {"title": title, "desp": body}
+            ).encode()
+            urllib.request.urlopen(
+                f"https://sctapi.ftqq.com/{SERVERCHAN_KEY}.send", data=data, timeout=15
+            )
+            print("[notify] Server酱 已发送")
+        except Exception as e:
+            print(f"[notify] Server酱 发送失败: {e}")
+    if SMTP_USER and SMTP_AUTH_CODE:
+        try:
+            send_email(title, body)
+        except Exception as e:
+            print(f"[notify] 邮件发送失败: {e}")
+
+
+def list_availability_domains():
+    if ADS:
+        return ADS
+    identity = oci.identity.IdentityClient(config, retry_strategy=NO_RETRY)
+    return [ad.name for ad in identity.list_availability_domains(COMPARTMENT).data]
+
+def resolve_image_id(compute) -> str:
+    """IMAGE_ID 留空时, 自动查询该区域最新的 Ubuntu ARM (aarch64) 镜像。"""
+    if IMAGE_ID:
+        return IMAGE_ID
+    imgs = compute.list_images(
+        COMPARTMENT,
+        operating_system="Canonical Ubuntu",
+        shape="VM.Standard.A1.Flex",
+        sort_by="TIMECREATED",
+        sort_order="DESC",
+    ).data
+    img = next(i for i in imgs if "aarch64" in i.display_name.lower())
+    print(f"未填 IMAGE_ID, 自动选用镜像: {img.display_name}")
+    return img.id
+
+
+def try_launch(compute, ad_name: str, image_id: str):
+    details = oci.core.models.LaunchInstanceDetails(
+        compartment_id=COMPARTMENT,
+        availability_domain=ad_name,
+        display_name=DISPLAY_NAME,
+        shape="VM.Standard.A1.Flex",
+        shape_config=oci.core.models.LaunchInstanceShapeConfigDetails(
+            ocpus=OCPUS, memory_in_gbs=MEMORY_GB
+        ),
+        source_details=oci.core.models.InstanceSourceViaImageDetails(image_id=image_id),
+        create_vnic_details=oci.core.models.CreateVnicDetails(subnet_id=SUBNET_ID, assign_public_ip=True),
+        metadata={"ssh_authorized_keys": SSH_PUBLIC_KEY},
+    )
+    return compute.launch_instance(details)
+
+
+def main():
+    ads = list_availability_domains()
+    print(f"区域 {config['region']} 可用域: {ads}")
+    print(f"目标配置: {OCPUS} OCPU / {MEMORY_GB}GB, 间隔 {INTERVAL}s")
+    compute = oci.core.ComputeClient(config, retry_strategy=NO_RETRY)
+    image_id = resolve_image_id(compute)
+
+    attempt = 0
+    deadline = time.time() + RUN_BUDGET_SECONDS
+    while True:
+        attempt += 1
+        for ad in ads:
+            try:
+                resp = try_launch(compute, ad, image_id)
+                inst = resp.data
+                msg = f"🎉 抢到了!\n实例: {inst.display_name}\nOCID: {inst.id}\n可用域: {ad}"
+                print(msg)
+                notify("OCI A1 抢购成功", msg)
+                return 0
+            except oci.exceptions.ServiceError as e:
+                status = e.status
+                msg = (e.message or "").lower()
+                if status in (500, 429) or "capacity" in msg or "limit" in msg and "out" in msg:
+                    print(f"[{time.strftime('%H:%M:%S')}] #{attempt} {ad}: 容量不足({status}), 继续等")
+                elif status == 404 and "out of host capacity" in msg:
+                    print(f"[{time.strftime('%H:%M:%S')}] #{attempt} {ad}: 容量不足, 继续等")
+                else:
+                    # 凭据错误/配额用尽/参数错误等, 重试无意义
+                    err = f"致命错误 status={status}: {e.message}"
+                    print(err)
+                    notify("OCI 抢购脚本停止", err)
+                    return 1
+            except Exception as e:
+                print(f"[{time.strftime('%H:%M:%S')}] #{attempt} {ad}: 异常 {e}, 继续等")
+
+        if MAX_ATTEMPTS and attempt >= MAX_ATTEMPTS:
+            print("已达最大尝试次数, 退出")
+            return 1
+        if time.time() >= deadline:
+            print(f"本次运行预算 {RUN_BUDGET_SECONDS}s 已用完, 正常退出, 等待下次定时触发继续抢")
+            return 0
+        # 间隔 ±20% 抖动, 避免请求过于规律
+        time.sleep(int(INTERVAL * random.uniform(0.8, 1.2)))
+
+
+if __name__ == "__main__":
+    sys.exit(main())
