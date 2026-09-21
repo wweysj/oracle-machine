@@ -175,7 +175,7 @@ def main():
         attempt += 1
         for ad in ads:
             try:
-                resp = try_launch(compute, ad)
+                resp = try_launch(compute, ad, image_id)
                 inst = resp.data
                 msg = f"🎉 抢到了!\n实例: {inst.display_name}\nOCID: {inst.id}\n可用域: {ad}"
                 print(msg)
