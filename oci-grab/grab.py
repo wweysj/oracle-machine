@@ -44,12 +44,39 @@ def _cred(name: str) -> str:
         print(f"[warn] {name} 含非法字符, 已自动清洗 (长度 {len(raw)} -> {len(cleaned)})")
     return cleaned
 
+import base64
+import re
+
+# 尝试从 base64 解码私钥，如果失败则当作普通文本处理
+def _load_private_key() -> str:
+    raw_key = os.environ.get("OCI_PRIVATE_KEY", "").strip()
+
+    # 尝试 base64 解码
+    try:
+        decoded = base64.b64decode(raw_key).decode('utf-8')
+        print("[info] 私钥使用 base64 解码")
+        key = decoded
+    except Exception:
+        # 替换转义的换行符
+        key = raw_key.replace("\\n", "\n")
+
+    # 清理私钥: 只保留从 BEGIN 到 END 的部分
+    match = re.search(r'(-----BEGIN[^-]+-----.*?-----END[^-]+-----)', key, re.DOTALL)
+    if match:
+        key = match.group(1).strip() + "\n"
+        print(f"[diag] 私钥已清理, 长度={len(key)}, 开头={key[:50]}, 结尾={key[-50:]}")
+    else:
+        print("[error] 私钥格式错误: 未找到有效的 PEM 标记")
+        print(f"[diag] 原始内容前100字符: {key[:100]}")
+
+    return key
+
 config = {
     "tenancy": _cred("OCI_TENANCY"),
     "user": _cred("OCI_USER"),
     "fingerprint": _cred("OCI_FINGERPRINT"),
     "region": _cred("OCI_REGION"),
-    "key_content": os.environ.get("OCI_PRIVATE_KEY", "").replace("\\n", "\n").strip() + "\n",
+    "key_content": _load_private_key(),
 }
 # 启动诊断: 只打印长度, 不泄露内容
 for k, v in config.items():
