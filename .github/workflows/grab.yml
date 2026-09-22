@@ -3,7 +3,7 @@ name: OCI A1 Grab
 on:
   schedule:
     # # GitHub cron 用 UTC 时间, 每 15 分钟一次(实际会排队延迟几分钟, 属正常)
-    - cron: "0,15,30,45 * * * *"
+   - cron: "7 * * * *"  # 每小时的第 7 分钟
   workflow_dispatch: {} # 支持手动触发测试
 
 concurrency:
